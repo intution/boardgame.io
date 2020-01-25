@@ -10,6 +10,7 @@ import * as ActionCreators from '../../core/action-creators';
 import { InMemory } from '../../server/db/inmemory';
 import { Master } from '../../master/master';
 import { Transport } from './transport';
+import { RandomBot } from '../../ai/random-bot';
 
 /**
  * Creates a local version of the master that the client
@@ -58,11 +59,24 @@ export class LocalTransport extends Transport {
    * @param {string} numPlayers - The number of players.
    * @param {string} server - The game server in the form of 'hostname:port'. Defaults to the server serving the client if not provided.
    */
-  constructor({ master, store, gameID, playerID, gameName, numPlayers }) {
+  constructor({ master, game, store, gameID, playerID, gameName, numPlayers }) {
     super({ store, gameName, playerID, gameID, numPlayers });
 
     this.master = master;
+    this.game = game;
     this.isConnected = true;
+
+    // TODO: Allow configuring which players are bots.
+    // The code currently just hardcodes player '1' as a bot.
+    console.log(game);
+    console.log('LocalTransport');
+    // TODO: ai is actually currently defined on the client config,
+    // not on the game object.
+    if (game.ai) {
+      this.bots = {
+        '1': new RandomBot({ enumerate: game.ai.enumerate, seed: game.seed }),
+      };
+    }
   }
 
   /**
@@ -76,6 +90,24 @@ export class LocalTransport extends Transport {
     if (gameID == this.gameID && state._stateID >= currentState._stateID) {
       const action = ActionCreators.update(state, deltalog);
       this.store.dispatch(action);
+
+      const newState = this.store.getState();
+      console.log(newState.ctx);
+      console.log(this.bots);
+      if (this.bots && isBotTurn(newState)) {
+        console.log(newState);
+        const botAction = this.bots['1'].play(state, '1');
+        console.log(botAction);
+        this.onAction(newState, botAction);
+      }
+    }
+  }
+
+  isBotTurn(state) {
+    if (state.ctx.stage) {
+      return '1' in state.ctx.stage;
+    } else {
+      return state.ctx.currentPlayer === '1';
     }
   }
 
@@ -150,8 +182,10 @@ export class LocalTransport extends Transport {
 
 const localMasters = new Map();
 export function Local() {
+  console.log('Local');
   return transportOpts => {
     let master;
+    console.log('Local B');
 
     if (localMasters.has(transportOpts.gameKey)) {
       master = localMasters.get(transportOpts.gameKey);
